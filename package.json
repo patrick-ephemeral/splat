@@ -1,0 +1,22 @@
+{
+  "name": "splat",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "http-server . -p 80 -c 1",
+    "build": "browserify src/index.ts -p [ tsify --noImplicitAny ] -o dist/bundle.js",
+    "watch": "watchify --debug src/index.ts -p [ tsify --noImplicitAny ] -o dist/bundle.js",
+    "dev": "concurrently \"npm run watch\" \"npm run start\""
+  },
+  "author": "",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "browserify": "17.0.1",
+    "concurrently": "9.2.1",
+    "http-server": "14.1.1",
+    "tsify": "5.0.4",
+    "typescript": "5.9.2",
+    "watchify": "4.0.0"
+  }
+}

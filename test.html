@@ -1,0 +1,363 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>3D Gaussian Splat Toy Renderer (WebGL2)</title>
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            background: #0b0d10;
+            color: #ddd;
+            font-family: system-ui, sans-serif;
+        }
+
+        #hud {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            padding: 8px 10px;
+            background: rgba(0, 0, 0, .35);
+            border-radius: 10px;
+            backdrop-filter: blur(6px);
+        }
+
+        #gl {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+
+        a {
+            color: #9bd;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="gl"></canvas>
+    <div id="hud">
+        <div><b>3D Gaussian Splat — Toy Renderer</b></div>
+        <div>Drag: orbit • Wheel/Pinch: zoom • Right-drag: pan</div>
+        <div id="stats"></div>
+    </div>
+    <script>
+        const vertSrc = `#version 300 es
+precision highp float;
+
+// Per-vertex (unit quad corners for billboard)
+layout (location=0) in vec2 aCorner; // (-1,-1),(1,-1),(-1,1),(1,1) as strip
+
+// Per-instance attributes
+layout (location=1) in vec3 aCenter;   // world-space center of splat
+layout (location=2) in float aRadius;  // world radius (meters)
+layout (location=3) in vec3 aColor;    // RGB [0,1]
+layout (location=4) in float aOpacity; // [0,1]
+
+uniform mat4 uView;
+uniform mat4 uProj;
+uniform vec2 uViewport; // (width,height) in pixels
+
+out vec2 vCorner;      // passes the -1..1 circle coords
+out float vRadiusPx;   // pixel radius at this depth
+out vec3 vColor;
+out float vOpacity;
+
+void main(){
+  // View space position
+  vec4 vpos = uView * vec4(aCenter, 1.0);
+  float z = -vpos.z; // camera looks -Z; assume right-handed view
+
+  // Pixels per view-space unit at this depth: (H/2) * f / z
+  float f = uProj[1][1];
+  float pixelsPerUnit = 0.5 * uViewport.y * f / max(z, 1e-4);
+  float radiusPx = max(aRadius * pixelsPerUnit, 1.0);
+
+  // Project the splat center
+  vec4 clip = uProj * vpos;
+
+  // Convert aCorner * radiusPx (pixels) to NDC offset: 2*pixels/viewport
+  vec2 ndcOffset = (aCorner * radiusPx) / (0.5 * uViewport);
+
+  // Apply in clip-space (multiply by w)
+  clip.xy += ndcOffset * clip.w;
+
+  gl_Position = clip;
+
+  vCorner = aCorner;
+  vRadiusPx = radiusPx;
+  vColor = aColor;
+  vOpacity = aOpacity;
+}
+`;
+
+        const fragSrc = `#version 300 es
+precision highp float;
+
+in vec2 vCorner;     // -1..1 quad coords
+in float vRadiusPx;  // pixel radius (for optional LOD)
+in vec3 vColor;
+in float vOpacity;
+
+out vec4 outColor;   // premultiplied alpha
+
+void main(){
+  float r = length(vCorner);
+  if (r > 1.0) discard; // circular footprint
+
+  // Simple isotropic Gaussian in screen-space
+  // Tweak sharpness: k in [2..8].
+  const float k = 2.0;
+  float w = exp(-k * r*r);
+
+  // Premultiplied color & alpha; alpha scaled by user opacity
+  float alpha = clamp(w * vOpacity, 0.0, 1.0);
+  outColor = vec4(vColor * alpha, alpha);
+}
+`;
+
+        // --- Minimal WebGL2 setup ---------------------------------------------------
+        const canvas = document.getElementById('gl');
+        const gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
+        if (!gl) { alert('WebGL2 not supported'); }
+
+        function resize() {
+            const dpr = Math.min(2, window.devicePixelRatio || 1);
+            const w = Math.floor(canvas.clientWidth * dpr);
+            const h = Math.floor(canvas.clientHeight * dpr);
+            if (canvas.width !== w || canvas.height !== h) {
+                canvas.width = w; canvas.height = h;
+            }
+            gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+        function fit() {
+            canvas.style.width = '100vw';
+            canvas.style.height = '100vh';
+            resize();
+        }
+        window.addEventListener('resize', resize);
+        fit();
+
+        function compile(type, src) {
+            const sh = gl.createShader(type);
+            gl.shaderSource(sh, src);
+            gl.compileShader(sh);
+            if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+                throw new Error(gl.getShaderInfoLog(sh));
+            }
+            return sh;
+        }
+        function link(vs, fs) {
+            const p = gl.createProgram();
+            gl.attachShader(p, vs);
+            gl.attachShader(p, fs);
+            gl.linkProgram(p);
+            if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+                throw new Error(gl.getProgramInfoLog(p));
+            }
+            return p;
+        }
+
+        const prog = link(compile(gl.VERTEX_SHADER, vertSrc), compile(gl.FRAGMENT_SHADER, fragSrc));
+
+        const loc = {
+            aCorner: 0,
+            aCenter: 1,
+            aRadius: 2,
+            aColor: 3,
+            aOpacity: 4,
+            uView: gl.getUniformLocation(prog, 'uView'),
+            uProj: gl.getUniformLocation(prog, 'uProj'),
+            uViewport: gl.getUniformLocation(prog, 'uViewport'),
+        };
+
+        // Unit quad (triangle strip): (-1,-1) (1,-1) (-1,1) (1,1)
+        const quad = new Float32Array([
+            -1, -1, 1, -1, -1, 1, 1, 1
+        ]);
+        const quadVBO = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+        gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+
+        // A tiny mat4 helper
+        function mat4Identity() { return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]; }
+        function mat4Multiply(a, b) {
+            const o = new Array(16).fill(0);
+            for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+                o[r * 4 + c] = a[r * 4 + 0] * b[0 * 4 + c] + a[r * 4 + 1] * b[1 * 4 + c] + a[r * 4 + 2] * b[2 * 4 + c] + a[r * 4 + 3] * b[3 * 4 + c];
+            }
+            return o;
+        }
+        function mat4Perspective(fovy, aspect, near, far) {
+            const f = 1 / Math.tan(0.5 * fovy);
+            const nf = 1 / (near - far);
+            return [
+                f / aspect, 0, 0, 0,
+                0, f, 0, 0,
+                0, 0, (far + near) * nf, -1,
+                0, 0, (2 * far * near) * nf, 0
+            ];
+        }
+        function mat4LookAt(eye, target, up) {
+            const zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+            let zl = Math.hypot(zx, zy, zz); const zxN = zx / zl, zyN = zy / zl, zzN = zz / zl;
+            let xx = up[1] * zzN - up[2] * zyN;
+            let xy = up[2] * zxN - up[0] * zzN;
+            let xz = up[0] * zyN - up[1] * zxN;
+            let xl = Math.hypot(xx, xy, xz); xx /= xl; xy /= xl; xz /= xl;
+            let yx = zyN * xz - zzN * xy;
+            let yy = zzN * xx - zxN * xz;
+            let yz = zxN * xy - zyN * xx;
+            return [
+                xx, yx, zxN, 0,
+                xy, yy, zyN, 0,
+                xz, yz, zzN, 0,
+                -(xx * eye[0] + xy * eye[1] + xz * eye[2]),
+                -(yx * eye[0] + yy * eye[1] + yz * eye[2]),
+                -(zxN * eye[0] + zyN * eye[1] + zzN * eye[2]),
+                1
+            ];
+        }
+
+        // Orbit controls
+        let yaw = 0.8, pitch = 0.5, dist = 6.0;
+        let panX = 0, panY = 0;
+        let mouse = { x: 0, y: 0, btn: 0 };
+        canvas.addEventListener('mousedown', e => { mouse.btn = e.button === 2 ? 2 : 1; mouse.x = e.clientX; mouse.y = e.clientY; });
+        canvas.addEventListener('mouseup', e => { mouse.btn = 0; });
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
+        canvas.addEventListener('mousemove', e => {
+            const dx = e.clientX - mouse.x, dy = e.clientY - mouse.y; mouse.x = e.clientX; mouse.y = e.clientY;
+            if (mouse.btn === 1) { yaw += dx * 0.005; pitch = Math.max(-1.4, Math.min(1.4, pitch + dy * 0.005)); }
+            else if (mouse.btn === 2) { panX += -dx * 0.01; panY += dy * 0.01; }
+        });
+        canvas.addEventListener('wheel', e => { dist *= Math.pow(1.1, e.deltaY * 0.001); dist = Math.max(1.0, Math.min(30.0, dist)); });
+
+        // Generate some demo splats (a puffy blob)
+        function makeSplatCloud(n) {
+            const centers = new Float32Array(n * 3);
+            const radii = new Float32Array(n);
+            const colors = new Float32Array(n * 3);
+            const opac = new Float32Array(n);
+            for (let i = 0; i < n; i++) {
+                // Random points within a sphere
+                let x, y, z; do {
+                    x = (Math.random() * 2 - 1);
+                    y = (Math.random() * 2 - 1);
+                    z = (Math.random() * 2 - 1);
+                } while (x * x + y * y + z * z > 1);
+                // Stretch to a lumpy blob
+                const s = 1.0 + 0.35 * Math.sin(6 * x) + 0.25 * Math.sin(8 * y) + 0.2 * Math.sin(10 * z);
+                centers[i * 3 + 0] = x * s;
+                centers[i * 3 + 1] = y * s * 0.6;
+                centers[i * 3 + 2] = z * s;
+
+                radii[i] = 0.015 + Math.random() * 0.035;
+
+                const hue = 0.58 + 0.15 * x; // bluish to cyan
+                const sat = 0.6 + 0.2 * Math.random();
+                const val = 0.8 + 0.2 * Math.random();
+                const rgb = hsv2rgb(hue, sat, val);
+                colors[i * 3 + 0] = rgb[0];
+                colors[i * 3 + 1] = rgb[1];
+                colors[i * 3 + 2] = rgb[2];
+
+                opac[i] = 0.8;
+            }
+            return { centers, radii, colors, opac };
+        }
+
+        function hsv2rgb(h, s, v) {
+            const i = Math.floor(h * 6.0);
+            const f = h * 6.0 - i;
+            const p = v * (1.0 - s);
+            const q = v * (1.0 - f * s);
+            const t = v * (1.0 - (1.0 - f) * s);
+            const mod = i % 6;
+            return [
+                [v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]
+            ][mod];
+        }
+
+        const NUM = 200000;
+        const data = makeSplatCloud(NUM);
+
+        // Instance buffers
+        function makeInstancedBuffer(targetLoc, arr, size) {
+            const buf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+            gl.bufferData(gl.ARRAY_BUFFER, arr, gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(targetLoc);
+            gl.vertexAttribPointer(targetLoc, size, gl.FLOAT, false, 0, 0);
+            gl.vertexAttribDivisor(targetLoc, 1);
+            return buf;
+        }
+
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+
+        // Bind quad corners (divisor 0)
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+        gl.enableVertexAttribArray(loc.aCorner);
+        gl.vertexAttribPointer(loc.aCorner, 2, gl.FLOAT, false, 0, 0);
+
+        // Per-instance attributes
+        const centerBuf = makeInstancedBuffer(loc.aCenter, data.centers, 3);
+        const radiusBuf = makeInstancedBuffer(loc.aRadius, data.radii, 1);
+        const colorBuf = makeInstancedBuffer(loc.aColor, data.colors, 3);
+        const opacBuf = makeInstancedBuffer(loc.aOpacity, data.opac, 1);
+
+        // State
+        gl.useProgram(prog);
+        gl.enable(gl.BLEND);
+        // Premultiplied alpha blending
+        gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+        // Main render loop
+        let lastT = 0;
+        function draw(t) {
+            const time = t * 0.001;
+            if (canvas.width === 0 || canvas.height === 0) resize();
+
+            // Animate slight rotation for fun
+            const yawAnim = yaw + time * 0.03;
+
+            const eye = [
+                Math.cos(yawAnim) * Math.cos(pitch) * dist + panX,
+                Math.sin(pitch) * dist + panY,
+                Math.sin(yawAnim) * Math.cos(pitch) * dist
+            ];
+            const target = [panX, panY, 0];
+            const up = [0, 1, 0];
+
+            const aspect = canvas.width / canvas.height;
+            const proj = mat4Perspective(50 * Math.PI / 180, aspect, 0.01, 100.0);
+            const view = mat4LookAt(eye, target, up);
+
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.clearColor(0.04, 0.05, 0.06, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            gl.useProgram(prog);
+            gl.uniformMatrix4fv(loc.uView, false, view);
+            gl.uniformMatrix4fv(loc.uProj, false, proj);
+            gl.uniform2f(loc.uViewport, canvas.width, canvas.height);
+
+            gl.bindVertexArray(vao);
+            gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, NUM);
+
+            // HUD stats
+            const el = document.getElementById('stats');
+            if (el) { el.textContent = `${NUM} splats • ${canvas.width}×${canvas.height}`; }
+
+            requestAnimationFrame(draw);
+        }
+        requestAnimationFrame(draw);
+
+    </script>
+</body>
+
+</html>
