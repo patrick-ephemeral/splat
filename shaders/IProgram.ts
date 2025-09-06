@@ -11,6 +11,6 @@ export interface ILinkedProgram {
         [key: string]: number,
     };
     uniforms: {
-        [key: string]: number,
+        [key: string]: WebGLUniformLocation | null,
     };
 }

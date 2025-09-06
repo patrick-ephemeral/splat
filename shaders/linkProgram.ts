@@ -6,6 +6,10 @@ const createShader = (
     source: string,
 ): WebGLShader | false => {
     const shader = gl.createShader(type);
+    if (!shader) {
+        throw new Error(`Could not create shader of type: ${type}`);
+    }
+
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
     const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);

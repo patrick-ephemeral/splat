@@ -1,0 +1,23 @@
+{
+    "compilerOptions": {
+        "target": "ES2020",
+        "module": "CommonJS",
+        "moduleResolution": "Node",
+        "strict": true,
+        "baseUrl": ".",
+        "paths": {
+            "@shaders/*": [
+                "shaders/*"
+            ],
+            "@math/*": [
+                "math/*"
+            ]
+        },
+        "esModuleInterop": true,
+        "skipLibCheck": true
+    },
+    "include": [
+        "src",
+        "types"
+    ]
+}

@@ -1,3 +1,5 @@
+import { tryA } from "./tryA";
+
 const root = document.createElement('div');
 root.className = 'root';
 
@@ -9,3 +11,5 @@ window.addEventListener('resize', () => {
 });
 
 document.body.appendChild(root);
+
+tryA(canvas);
