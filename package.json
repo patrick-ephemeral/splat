@@ -4,27 +4,15 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "http-server . -p 8080 -c 1",
-    "build": "browserify src/index.ts -p [ tsify ] -t aliasify -t [ stringify --extensions [.glsl,.vert,.frag] ] -o dist/bundle.js",
-    "watch": "watchify --debug src/index.ts -p [ tsify ] -t aliasify -t [ stringify --extensions [.glsl,.vert,.frag] ] -o dist/bundle.js",
-    "dev": "concurrently \"npm run watch\" \"npm run start\""
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 8080"
   },
-  "author": "",
+  "author": "Ephemeral Software, LLC",
   "license": "UNLICENSED",
   "devDependencies": {
-    "aliasify": "2.1.0",
-    "browserify": "17.0.1",
-    "concurrently": "9.2.1",
-    "http-server": "14.1.1",
-    "stringify": "5.2.0",
-    "tsify": "5.0.4",
     "typescript": "5.9.2",
-    "watchify": "4.0.0"
-  },
-  "aliasify": {
-    "aliases": {
-      "@shaders/*": "shaders/*",
-      "@math/*": "math/*"
-    }
+    "vite": "7.1.4",
+    "vite-tsconfig-paths": "5.1.4"
   }
 }
