@@ -59,7 +59,7 @@ export const tryA = (canvas: HTMLCanvasElement): void => {
         gl.viewport(0, 0, canvas.width, canvas.height);
 
         const now = performance.now();
-        const seconds = (now - start) / 1000;
+        const seconds = (now - start) / 700;
 
         gl.uniform1f(linked.uniforms["u_time"], seconds);
 
