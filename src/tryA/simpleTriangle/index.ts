@@ -3,9 +3,12 @@ import { IProgram } from "../../../shaders";
 import vertexShader from "./vertexShader.glsl?raw";
 import fragmentShader from "./fragmentShader.glsl?raw";
 
-export const SIMPLE_TRIANGLE: IProgram = {
+const simpleTriangle: IProgram = {
   vertexShader,
   fragmentShader,
   attributes: ["a_position"],
-  uniforms: [],
+  uniforms: ["u_time"],
 };
+
+
+export default simpleTriangle;
