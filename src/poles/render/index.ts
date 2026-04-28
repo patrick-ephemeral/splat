@@ -1,14 +1,10 @@
-// program-simple.ts
-import { IProgram } from "../../../shaders";
+import { IProgram } from "@shaders";
 import vertexShader from "./vertexShader.glsl?raw";
 import fragmentShader from "./fragmentShader.glsl?raw";
 
-const simpleTriangle: IProgram = {
+export const poleRenderer: IProgram = {
   vertexShader,
   fragmentShader,
   attributes: ["a_position"],
   uniforms: ["u_time"],
 };
-
-
-export default simpleTriangle;

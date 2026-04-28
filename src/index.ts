@@ -1,4 +1,4 @@
-import { tryA } from "./tryA";
+import { initialize } from "./break";
 
 const root = document.createElement('div');
 root.className = 'root';
@@ -12,4 +12,4 @@ window.addEventListener('resize', () => {
 
 document.body.appendChild(root);
 
-tryA(canvas);
+initialize(canvas);
